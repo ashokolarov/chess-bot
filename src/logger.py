@@ -2,10 +2,9 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
-import numpy as np
 
 
 class AlphaZeroLogger:
@@ -27,10 +26,11 @@ class AlphaZeroLogger:
             "avg_game_length": [],
             "win_rate_white": [],
             "draw_rate": [],
+            "loss_rate": [],
             "learning_rate": [],
         }
 
-        # Timing
+        # For timing
         self.iteration_start_time = None
 
     def create_log_directory(self):
@@ -53,6 +53,7 @@ class AlphaZeroLogger:
         avg_game_length: float = None,
         win_rate_white: float = None,
         draw_rate: float = None,
+        loss_rate: float = None,
         learning_rate: float = None,
     ):
         """
@@ -68,6 +69,7 @@ class AlphaZeroLogger:
             avg_game_length: Average length of games
             win_rate_white: Win rate for white pieces
             draw_rate: Draw rate
+            loss_rate: Loss rate
             learning_rate: Learning rate
         """
         # Calculate time per iteration
@@ -84,8 +86,9 @@ class AlphaZeroLogger:
         self.metrics["training_examples"].append(training_examples)
         self.metrics["time_per_iteration"].append(time_per_iteration)
         self.metrics["avg_game_length"].append(avg_game_length or 0)
-        self.metrics["win_rate_white"].append(win_rate_white or 0.5)
+        self.metrics["win_rate_white"].append(win_rate_white or 0)
         self.metrics["draw_rate"].append(draw_rate or 0)
+        self.metrics["loss_rate"].append(loss_rate or 0)
         self.metrics["learning_rate"].append(learning_rate or 0)
 
         # Print progress
@@ -211,6 +214,13 @@ class AlphaZeroLogger:
             color="brown",
             marker="s",
         )
+        axes[1, 1].plot(
+            iterations,
+            self.metrics["loss_rate"],
+            label="Black Win Rate",
+            color="black",
+            marker="^",
+        )
         axes[1, 1].axhline(y=0.5, color="black", linestyle="--", alpha=0.5, label="50%")
         axes[1, 1].set_xlabel("Iteration")
         axes[1, 1].set_ylabel("Rate")
@@ -299,7 +309,7 @@ class AlphaZeroLogger:
         final_total_loss = self.metrics["total_loss"][-1]
 
         print(f"\n{'=' * 60}")
-        print(f"TRAINING SUMMARY")
+        print("TRAINING SUMMARY")
         print(f"{'=' * 60}")
         print(f"Total Iterations: {len(self.metrics['iteration'])}")
         print(f"Total Games Played: {total_games}")

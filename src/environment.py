@@ -90,10 +90,12 @@ class ChessEnvironment:
             # Winner gets +1, loser gets -1
             reward = 1.0 if not self.board.turn else -1.0
             done = True
-        elif self.board.is_stalemate() or self.board.is_insufficient_material():
-            reward = 0.0  # Draw
-            done = True
-        elif self.board.is_fifty_moves() or self.board.is_repetition(3):
+        elif (
+            self.board.is_stalemate()
+            or self.board.is_insufficient_material()
+            or self.board.is_repetition(3)
+            or self.board.is_fifty_moves()
+        ):
             reward = 0.0  # Draw
             done = True
 

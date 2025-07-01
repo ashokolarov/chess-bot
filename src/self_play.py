@@ -52,6 +52,9 @@ class SelfPlay:
         dirichlet_epsilon: float,
         mcts_batch_size: int,
         resign_threshold: int,
+        initial_temperature: float,
+        min_temperature: float,
+        move_limit: int,
     ):
         self.neural_net = neural_net
         self.mcts = MCTS(
@@ -63,8 +66,14 @@ class SelfPlay:
             batch_size=mcts_batch_size,
         )
         self.resign_threshold = resign_threshold
+        self.initial_temperature = initial_temperature
+        self.min_temperature = min_temperature
+        self.move_limit = move_limit
 
-    def play_game(self, verbose: bool = False) -> SelfPlayGame:
+    def _clear_line(self):
+        print("\r" + " " * 120 + "\r", end="", flush=True)
+
+    def play_game(self, verbose: bool = True) -> SelfPlayGame:
         """
         Play a complete self-play game.
 
@@ -84,7 +93,10 @@ class SelfPlay:
             state = env.get_state()
 
             # Determine temperature (high early in game, low later)
-            temperature = max(0.25, 1.0 - (move_count * 0.01))  # Gradual decay
+            temperature = max(
+                self.min_temperature,
+                self.initial_temperature - (move_count * 0.05),
+            )  # Gradual decay
 
             # Run MCTS to get improved policy (with noise for exploration)
             policy, root = self.mcts.search(
@@ -100,6 +112,7 @@ class SelfPlay:
                 # Resign if position is very bad (threshold: -0.80)
                 if position_value < -0.80:
                     if verbose:
+                        self._clear_line()
                         print(
                             f"Resignation at move {move_count}, position value: {position_value:.3f}"
                         )
@@ -139,18 +152,19 @@ class SelfPlay:
             move_count += 1
 
             if verbose and move_count % 10 == 0:
-                print(f"Move {move_count}, FEN: {env.get_fen()}")
+                print(f"Move {move_count}, FEN: {env.get_fen()}", end="\r")
 
             # Reduced move limit to prevent endless games
-            if move_count > 150:
+            if move_count > self.move_limit:
                 if verbose:
+                    self._clear_line()
                     print("Game terminated due to move limit")
                 break
 
         # Get game result and set rewards
         final_result = env.get_result()
         if final_result is None:
-            final_result = 0.0  # Draw if game limit reached
+            final_result = -1.0  # Lose if game limit reached
 
         game.set_rewards(final_result)
 
@@ -162,13 +176,14 @@ class SelfPlay:
                 if final_result < 0
                 else "Draw"
             )
+            self._clear_line()
             print(f"Game finished: {result_str}, Moves: {move_count}")
 
         return game
 
     def generate_training_data(
         self, num_games: int, verbose: bool = False
-    ) -> List[Tuple[np.ndarray, np.ndarray, float]]:
+    ) -> tuple[List[Tuple[np.ndarray, np.ndarray, float]], List[float]]:
         """
         Generate training data by playing multiple self-play games.
 
@@ -177,17 +192,24 @@ class SelfPlay:
             verbose: Whether to print progress
 
         Returns:
-            List of training examples (state, policy, reward)
+            Tuple of (training_examples, game_results)
+            - training_examples: List of training examples (state, policy, reward)
+            - game_results: List of game outcomes (+1 for white win, -1 for black win, 0 for draw)
         """
         all_examples = []
+        game_results = []  # Track actual game results
 
         for game_idx in range(num_games):
             if verbose:
-                print(f"Playing game {game_idx + 1}/{num_games}")
+                print(f"Playing game {game_idx + 1}/{num_games}", end="\r")
 
-            game = self.play_game(verbose=False)
+            game = self.play_game(verbose=verbose)
             examples = game.get_training_examples()
             all_examples.extend(examples)
+
+            # Track the actual game result (from the last reward in the game)
+            final_result = game.rewards[-1] if game.rewards else 0.0
+            game_results.append(final_result)
 
             if verbose and (game_idx + 1) % 10 == 0:
                 print(
@@ -198,8 +220,13 @@ class SelfPlay:
             print(
                 f"Generated {len(all_examples)} training examples from {num_games} games"
             )
+            # Print game result summary
+            wins = sum(1 for r in game_results if r > 0)
+            draws = sum(1 for r in game_results if r == 0)
+            losses = sum(1 for r in game_results if r < 0)
+            print(f"Game results: {wins} wins, {draws} draws, {losses} losses")
 
-        return all_examples
+        return all_examples, game_results
 
     def evaluate_position(self, fen: str) -> Tuple[float, np.ndarray]:
         """

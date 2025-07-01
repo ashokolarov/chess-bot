@@ -3,4 +3,5 @@ torchvision>=0.15.0
 python-chess>=1.11
 numpy>=1.21.0
 matplotlib>=3.5.0
-tqdm>=4.64.0 
+tqdm>=4.64.0
+PyYAML>=6.0 

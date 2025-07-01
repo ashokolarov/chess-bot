@@ -1,0 +1,52 @@
+# AlphaZero Chess Training Configuration
+
+verbose: true
+
+# Network architecture
+network:
+  num_res_blocks: 4
+  num_channels: 64
+
+# Training parameters
+training:
+  num_iterations: 5
+  epochs_per_iteration: 10
+  batch_size: 32
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  checkpoint_interval: 5
+  max_training_examples: 100000  # Replay buffer size
+
+# Learning rate scheduler parameters
+scheduler:
+  # type: "step"  # Options: "step"
+  # step_size: 2  # For StepLR: reduce LR every N iterations
+  # gamma: 0.8  # For StepLR: multiply LR by this factor
+  type: "onecycle"  # Options: "step"
+  max_lr_factor: 1.5
+  pct_start: 0.3
+
+# Self-play parameters
+self_play:
+  games_per_iteration: 5
+  mcts_simulations: 250
+  initial_temperature: 1.5
+  min_temperature: 0.05
+  c_puct: 1.4142  # sqrt(2)
+  mcts_batch_size: 32  # Batch size for neural network inference
+  resign_threshold: 40
+  move_limit: 300
+
+# Dirichlet noise parameters
+dirichlet:
+  alpha: 0.3
+  epsilon: 0.25
+
+
+# Directories
+directories:
+  models_dir: "models"
+  logs_dir: "logs"
+
+# Device selection (auto-detected)
+device: "auto"  # Will be set to "cuda", "mps", or "cpu" automatically 

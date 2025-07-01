@@ -1,11 +1,10 @@
-import random
 from typing import List, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, StepLR
+from torch.optim.lr_scheduler import OneCycleLR, StepLR
 from torch.utils.data import DataLoader, Dataset
 
 from .network import AlphaZeroNet
@@ -42,26 +41,25 @@ class AlphaZeroTrainer:
     def __init__(
         self,
         neural_net: AlphaZeroNet,
-        learning_rate: float = 0.001,
-        weight_decay: float = 1e-4,
-        device: str = None,
+        learning_rate: float,
+        weight_decay: float,
+        device: str,
         scheduler_type: str = "step",
         scheduler_params: dict = None,
     ):
         self.neural_net = neural_net
-        self.device = (
-            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = device
         self.neural_net.to(self.device)
 
         # Optimizer
         self.optimizer = optim.Adam(
             neural_net.parameters(), lr=learning_rate, weight_decay=weight_decay
         )
+        self.lr = learning_rate
 
-        # Learning rate scheduler
+        # Learning rate scheduler config
         self.scheduler_type = scheduler_type
-        self.scheduler = self._create_scheduler(scheduler_type, scheduler_params or {})
+        self.scheduler_params = scheduler_params
 
         # Loss functions
         self.policy_loss_fn = nn.CrossEntropyLoss()
@@ -75,14 +73,19 @@ class AlphaZeroTrainer:
             "learning_rate": [],
         }
 
-    def _create_scheduler(self, scheduler_type: str, scheduler_params: dict):
+    def _create_scheduler(
+        self,
+        scheduler_type: str,
+        scheduler_params: dict,
+        total_num_steps: int = None,
+    ):
         """
         Create a learning rate scheduler.
 
         Args:
-            scheduler_type: Type of scheduler ('step', 'plateau', 'cosine')
+            scheduler_type: Type of scheduler ('step')
             scheduler_params: Parameters for the scheduler
-
+            num_training_samples: Number of training samples
         Returns:
             Learning rate scheduler
         """
@@ -91,47 +94,23 @@ class AlphaZeroTrainer:
             step_size = scheduler_params.get("step_size", 5)
             gamma = scheduler_params.get("gamma", 0.8)
             return StepLR(self.optimizer, step_size=step_size, gamma=gamma)
-
-        elif scheduler_type == "plateau":
-            # ReduceLROnPlateau: Reduce LR when loss stops improving
-            factor = scheduler_params.get("factor", 0.5)
-            patience = scheduler_params.get("patience", 3)
-            threshold = scheduler_params.get("threshold", 1e-3)
-            return ReduceLROnPlateau(
+        elif scheduler_type == "onecycle":
+            # OneCycleLR: Gradually increase LR from min_lr to max_lr
+            max_lr_factor = scheduler_params.get("max_lr_factor")
+            max_lr = self.lr * max_lr_factor
+            pct_start = scheduler_params.get("pct_start")
+            return OneCycleLR(
                 self.optimizer,
-                mode="min",
-                factor=factor,
-                patience=patience,
-                threshold=threshold,
-                verbose=True,
+                max_lr=max_lr,
+                total_steps=total_num_steps,
+                pct_start=pct_start,
             )
-
-        elif scheduler_type == "cosine":
-            # CosineAnnealingLR: Cosine annealing schedule
-            T_max = scheduler_params.get("T_max", 50)  # Max iterations
-            eta_min = scheduler_params.get("eta_min", 1e-6)
-            return CosineAnnealingLR(self.optimizer, T_max=T_max, eta_min=eta_min)
-
         else:
             raise ValueError(f"Unknown scheduler type: {scheduler_type}")
 
     def get_current_lr(self) -> float:
         """Get current learning rate."""
         return self.optimizer.param_groups[0]["lr"]
-
-    def step_scheduler(self, loss: float = None):
-        """
-        Step the learning rate scheduler.
-
-        Args:
-            loss: Current loss (required for plateau scheduler)
-        """
-        if self.scheduler_type == "plateau":
-            if loss is None:
-                raise ValueError("Loss is required for plateau scheduler")
-            self.scheduler.step(loss)
-        else:
-            self.scheduler.step()
 
     def train_step(
         self,
@@ -151,7 +130,7 @@ class AlphaZeroTrainer:
             Policy loss, value loss, total loss
         """
         self.neural_net.train()
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
         # Forward pass
         policy_logits, predicted_values = self.neural_net(states)
@@ -166,6 +145,9 @@ class AlphaZeroTrainer:
         # Backward pass
         total_loss.backward()
         self.optimizer.step()
+
+        if self.scheduler_type == "onecycle":
+            self.scheduler.step()
 
         return policy_loss.item(), value_loss.item(), total_loss.item()
 
@@ -194,9 +176,7 @@ class AlphaZeroTrainer:
 
     def train_epoch(
         self,
-        training_examples: List[Tuple[np.ndarray, np.ndarray, float]],
-        batch_size: int = 32,
-        shuffle: bool = True,
+        dataloader: DataLoader,
     ) -> Tuple[float, float, float]:
         """
         Train for one epoch on the given examples.
@@ -209,14 +189,11 @@ class AlphaZeroTrainer:
         Returns:
             Average policy loss, value loss, total loss for the epoch
         """
-        # Create dataset and dataloader
-        dataset = ChessDataset(training_examples, device=self.device)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
         total_policy_loss = 0.0
         total_value_loss = 0.0
         total_loss = 0.0
-        num_batches = 0
+        num_batches = len(dataloader)
 
         for states, policies, values in dataloader:
             # Training step
@@ -227,7 +204,6 @@ class AlphaZeroTrainer:
             total_policy_loss += policy_loss
             total_value_loss += value_loss
             total_loss += batch_loss
-            num_batches += 1
 
         # Calculate averages
         avg_policy_loss = total_policy_loss / num_batches
@@ -266,15 +242,18 @@ class AlphaZeroTrainer:
                 f"Training on {len(training_examples)} examples for {epochs} epochs..."
             )
 
-        for epoch in range(epochs):
-            # Shuffle examples for each epoch
-            shuffled_examples = training_examples.copy()
-            random.shuffle(shuffled_examples)
+        # Create dataset and dataloader
+        dataset = ChessDataset(training_examples, device=self.device)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
+        # Create learning rate scheduler
+        self.scheduler = self._create_scheduler(
+            self.scheduler_type, self.scheduler_params, len(dataloader) * epochs
+        )
+
+        for epoch in range(epochs):
             # Train for one epoch
-            policy_loss, value_loss, total_loss = self.train_epoch(
-                shuffled_examples, batch_size=batch_size, shuffle=True
-            )
+            policy_loss, value_loss, total_loss = self.train_epoch(dataloader)
 
             if verbose:
                 current_lr = self.get_current_lr()

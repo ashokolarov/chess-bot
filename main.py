@@ -13,14 +13,14 @@ import argparse
 import os
 import signal
 import sys
-from typing import List, Tuple
+from typing import List
 
-import numpy as np
 import torch
 
 # Add src directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
+from src.config import Config
 from src.environment import ChessEnvironment
 from src.logger import AlphaZeroLogger
 from src.mcts import MCTS
@@ -29,84 +29,37 @@ from src.self_play import SelfPlay
 from src.trainer import AlphaZeroTrainer
 
 
-class AlphaZeroTrainingConfig:
-    """Configuration for AlphaZero training."""
-
-    def __init__(self):
-        # Network architecture
-        self.num_res_blocks = 10
-        self.num_channels = 256
-
-        # Training parameters
-        self.learning_rate = 0.001
-        self.weight_decay = 1e-4
-        self.batch_size = 32
-        self.epochs_per_iteration = 10
-
-        # Learning rate scheduler parameters
-        self.scheduler_type = "step"  # Options: "step", "plateau", "cosine"
-        self.scheduler_params = {
-            "step_size": 5,  # For StepLR: reduce LR every N iterations
-            "gamma": 0.8,  # For StepLR: multiply LR by this factor
-            "factor": 0.5,  # For ReduceLROnPlateau: factor to reduce LR
-            "patience": 3,  # For ReduceLROnPlateau: iterations to wait before reducing
-            "T_max": 25,  # For CosineAnnealingLR: maximum iterations
-        }
-
-        # Self-play parameters
-        self.games_per_iteration = 20
-        self.mcts_simulations = 200
-        self.c_puct = np.sqrt(2)
-        self.mcts_batch_size = 32  # Batch size for neural network inference
-        self.resign_threshold = 40
-
-        # Dirichlet noise parameters
-        self.dirichlet_alpha = 0.3
-        self.dirichlet_epsilon = 0.4
-
-        # Training loop
-        self.num_iterations = 25
-        self.checkpoint_interval = 5
-        self.max_training_examples = 100000  # Replay buffer size
-
-        # Directories
-        self.models_dir = "models"
-        self.logs_dir = "logs"
-
-        # Device
-        if torch.cuda.is_available():
-            self.device = "cuda"
-        elif torch.backends.mps.is_available():
-            self.device = "mps"
-        else:
-            self.device = "cpu"
-
-
-def analyze_game_data(
-    training_examples: List[Tuple[np.ndarray, np.ndarray, float]], num_games: int
-) -> dict:
-    """Analyze training data to extract statistics."""
-    if not training_examples or num_games == 0:
+def analyze_game_data(game_results: List[float], num_games: int) -> dict:
+    """Analyze game results to extract statistics."""
+    if not game_results or num_games == 0:
         return {}
 
-    rewards = [example[2] for example in training_examples]
-    total = len(rewards)
-    wins = sum(1 for r in rewards if r > 0)
-    draws = sum(1 for r in rewards if r == 0)
+    # Analyze actual game results
+    wins = sum(1 for r in game_results if r > 0)
+    draws = sum(1 for r in game_results if r == 0)
+    losses = sum(1 for r in game_results if r < 0)
+
+    total_games = len(game_results)
+
+    # Calculate rates
+    win_rate = wins / total_games if total_games > 0 else 0
+    draw_rate = draws / total_games if total_games > 0 else 0
+    loss_rate = losses / total_games if total_games > 0 else 0
 
     return {
-        "avg_game_length": len(training_examples) / num_games if num_games > 0 else 0,
-        "win_rate_white": wins / total if total > 0 else 0.5,
-        "draw_rate": draws / total if total > 0 else 0,
+        "win_rate_white": win_rate,
+        "draw_rate": draw_rate,
+        "loss_rate": loss_rate,
+        "total_games": total_games,
     }
 
 
-def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
+def train_alphazero(config: Config):
     """
     Main AlphaZero training loop.
 
     Args:
-        config: Training configuration
+        config: Configuration object
         resume_from: Path to checkpoint to resume from (optional)
     """
 
@@ -119,7 +72,8 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
         print(f"\n\nTraining interrupted by signal {signum}")
         if trainer is not None:
             emergency_save_path = os.path.join(
-                config.models_dir, f"emergency_save_iter_{current_iteration}.pth"
+                config.get("directories.models_dir"),
+                f"emergency_save_iter_{current_iteration}.pth",
             )
             trainer.save_checkpoint(emergency_save_path, current_iteration)
             print(f"Emergency checkpoint saved: {emergency_save_path}")
@@ -130,94 +84,88 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
     signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
     signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
     print("Starting AlphaZero Chess Training")
-    print(f"Device: {config.device}")
-    print(f"Games per iteration: {config.games_per_iteration}")
-    print(f"MCTS simulations: {config.mcts_simulations}")
-    print(f"MCTS batch size: {config.mcts_batch_size}")
-    print(f"Training iterations: {config.num_iterations}")
-    print(f"Learning rate: {config.learning_rate}")
-    print(f"Scheduler: {config.scheduler_type}")
-    if config.scheduler_type == "step":
-        print(
-            f"  Step size: {config.scheduler_params['step_size']}, Gamma: {config.scheduler_params['gamma']}"
-        )
-    elif config.scheduler_type == "plateau":
-        print(
-            f"  Patience: {config.scheduler_params['patience']}, Factor: {config.scheduler_params['factor']}"
-        )
-    elif config.scheduler_type == "cosine":
-        print(f"  T_max: {config.scheduler_params['T_max']}")
-    print(f"Dirichlet noise: α={config.dirichlet_alpha}, ε={config.dirichlet_epsilon}")
+    config.print_config()
 
     # Create directories
-    os.makedirs(config.models_dir, exist_ok=True)
-    os.makedirs(config.logs_dir, exist_ok=True)
+    models_dir = config.get("directories.models_dir")
+    logs_dir = config.get("directories.logs_dir")
+    os.makedirs(models_dir, exist_ok=True)
+    os.makedirs(logs_dir, exist_ok=True)
 
     # Initialize components
-    neural_net = AlphaZeroNet(config.num_res_blocks, config.num_channels)
+    neural_net = AlphaZeroNet(
+        config.get("network.num_res_blocks"), config.get("network.num_channels")
+    )
     trainer = AlphaZeroTrainer(
         neural_net,
-        config.learning_rate,
-        config.weight_decay,
-        config.device,
-        config.scheduler_type,
-        config.scheduler_params,
+        config.get("training.learning_rate"),
+        config.get("training.weight_decay"),
+        config.get_device(),
+        config.get("scheduler.type"),
+        config.get_scheduler_config(),
     )
-    logger = AlphaZeroLogger(config.logs_dir)
+    logger = AlphaZeroLogger(logs_dir)
 
     # Resume from checkpoint if specified
     start_iteration = 0
-    if resume_from and os.path.exists(resume_from):
-        print(f"Resuming training from: {resume_from}")
-        start_iteration = trainer.load_checkpoint(resume_from)
+    if config.get("training.resume_from") and os.path.exists(
+        config.get("training.resume_from")
+    ):
+        print(f"Resuming training from: {config.get('training.resume_from')}")
+        start_iteration = trainer.load_checkpoint(config.get("training.resume_from"))
         print(f"Resumed from iteration {start_iteration}")
 
     # Training loop
     all_training_examples = []
 
     try:
-        for iteration in range(start_iteration, config.num_iterations):
+        for iteration in range(start_iteration, config.get("training.num_iterations")):
             current_iteration = iteration + 1  # Update for signal handler
-            print(f"\n{'=' * 60}")
-            print(f"STARTING ITERATION {current_iteration}/{config.num_iterations}")
+            print(f"{'=' * 60}")
+            print(
+                f"STARTING ITERATION {current_iteration}/{config.get('training.num_iterations')}"
+            )
             print(f"{'=' * 60}")
 
             logger.start_iteration()
 
-            # Self-play phase
-            print("Phase 1: Self-play data generation")
+            # Create self-play instance
             self_play = SelfPlay(
                 neural_net,
-                mcts_simulations=config.mcts_simulations,
-                c_puct=config.c_puct,
-                dirichlet_alpha=config.dirichlet_alpha,
-                dirichlet_epsilon=config.dirichlet_epsilon,
-                mcts_batch_size=config.mcts_batch_size,
-                resign_threshold=config.resign_threshold,
+                mcts_simulations=config.get("self_play.mcts_simulations"),
+                c_puct=config.get("self_play.c_puct"),
+                dirichlet_alpha=config.get("dirichlet.alpha"),
+                dirichlet_epsilon=config.get("dirichlet.epsilon"),
+                mcts_batch_size=config.get("self_play.mcts_batch_size"),
+                resign_threshold=config.get("self_play.resign_threshold"),
+                initial_temperature=config.get("self_play.initial_temperature"),
+                min_temperature=config.get("self_play.min_temperature"),
+                move_limit=config.get("self_play.move_limit"),
             )
 
             # Generate training data
-            new_examples = self_play.generate_training_data(
-                config.games_per_iteration, verbose=True
+            new_examples, game_results = self_play.generate_training_data(
+                config.get("self_play.games_per_iteration"),
+                verbose=config.get("verbose", False),
             )
 
-            # Add new examples to training data
+            # Add new examples to the training set
             all_training_examples.extend(new_examples)
 
             # Keep only recent examples (memory management)
-            if len(all_training_examples) > config.max_training_examples:
+            if len(all_training_examples) > config.get(
+                "training.max_training_examples"
+            ):
                 all_training_examples = all_training_examples[
-                    -config.max_training_examples :
+                    -config.get("training.max_training_examples") :
                 ]
 
-            print(f"Total training examples: {len(all_training_examples)}")
-
-            # Training phase
-            print("Phase 2: Neural network training")
+            # Train the network
+            print(f"\nTraining network on {len(all_training_examples)} examples...")
             history = trainer.train(
                 all_training_examples,
-                epochs=config.epochs_per_iteration,
-                batch_size=config.batch_size,
+                epochs=config.get("training.epochs_per_iteration"),
+                batch_size=config.get("training.batch_size"),
                 verbose=True,
             )
 
@@ -226,38 +174,39 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
             final_value_loss = history["value_loss"][-1]
             final_total_loss = history["total_loss"][-1]
 
-            # Step the learning rate scheduler
-            if config.scheduler_type == "plateau":
-                trainer.step_scheduler(final_total_loss)
-            else:
-                trainer.step_scheduler()
-
             current_lr = trainer.get_current_lr()
-            print(f"Learning rate after iteration {iteration + 1}: {current_lr:.6f}")
 
-            # Analyze game data
-            game_stats = analyze_game_data(new_examples, config.games_per_iteration)
+            # Analyze game data using actual game results
+            game_stats = analyze_game_data(
+                game_results, config.get("self_play.games_per_iteration")
+            )
+
+            # Calculate average game length from training examples
+            avg_game_length = (
+                len(new_examples) / len(game_results) if game_results else 0
+            )
 
             # Log iteration results
             logger.log_iteration(
-                iteration + 1,
+                current_iteration,
                 final_policy_loss,
                 final_value_loss,
                 final_total_loss,
-                config.games_per_iteration,
+                config.get("self_play.games_per_iteration"),
                 len(new_examples),
-                game_stats.get("avg_game_length"),
+                avg_game_length,
                 game_stats.get("win_rate_white"),
                 game_stats.get("draw_rate"),
+                game_stats.get("loss_rate"),
                 current_lr,
             )
 
             # Save checkpoint
-            if (iteration + 1) % config.checkpoint_interval == 0:
+            if (current_iteration) % config.get("training.checkpoint_interval") == 0:
                 checkpoint_path = os.path.join(
-                    config.models_dir, f"checkpoint_iter_{iteration + 1}.pth"
+                    models_dir, f"checkpoint_iter_{current_iteration}.pth"
                 )
-                trainer.save_checkpoint(checkpoint_path, iteration + 1)
+                trainer.save_checkpoint(checkpoint_path, current_iteration)
                 print(f"Checkpoint saved: {checkpoint_path}")
 
             # Save progress visualization
@@ -271,7 +220,7 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
     except KeyboardInterrupt:
         print(f"\n\nTraining interrupted by user at iteration {current_iteration}")
         emergency_save_path = os.path.join(
-            config.models_dir, f"emergency_save_iter_{current_iteration}.pth"
+            models_dir, f"emergency_save_iter_{current_iteration}.pth"
         )
         trainer.save_checkpoint(emergency_save_path, current_iteration)
         print(f"Emergency checkpoint saved: {emergency_save_path}")
@@ -279,8 +228,8 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
         return
 
     # Final model save
-    final_model_path = os.path.join(config.models_dir, "final_model.pth")
-    trainer.save_checkpoint(final_model_path, config.num_iterations)
+    final_model_path = os.path.join(models_dir, "final_model.pth")
+    trainer.save_checkpoint(final_model_path, config.get("training.num_iterations"))
     print(f"\nFinal model saved: {final_model_path}")
 
     # Final summary
@@ -318,7 +267,7 @@ def test_model(model_path: str, num_games: int = 5):
 
     # Play test games
     for game_idx in range(num_games):
-        print(f"\nGame {game_idx + 1}/{num_games}")
+        print(f"\nGame {game_idx + 1}/{num_games}\n")
         env = ChessEnvironment()
         move_count = 0
 
@@ -366,18 +315,6 @@ def main():
         "--batch-size", type=int, default=None, help="Training batch size"
     )
     parser.add_argument(
-        "--dirichlet-alpha",
-        type=float,
-        default=None,
-        help="Dirichlet noise alpha parameter",
-    )
-    parser.add_argument(
-        "--dirichlet-epsilon",
-        type=float,
-        default=None,
-        help="Dirichlet noise epsilon parameter",
-    )
-    parser.add_argument(
         "--batch-size-mcts",
         type=int,
         default=None,
@@ -390,55 +327,29 @@ def main():
         default=None,
         help="Learning rate scheduler type",
     )
-    parser.add_argument(
-        "--scheduler-step-size",
-        type=int,
-        default=None,
-        help="Step size for StepLR scheduler",
-    )
-    parser.add_argument(
-        "--scheduler-gamma",
-        type=float,
-        default=None,
-        help="Gamma factor for StepLR scheduler",
-    )
-    parser.add_argument(
-        "--scheduler-patience",
-        type=int,
-        default=None,
-        help="Patience for ReduceLROnPlateau scheduler",
-    )
 
     args = parser.parse_args()
 
     if args.train:
-        config = AlphaZeroTrainingConfig()
+        config = Config("train_config.yaml")
         if args.iterations is not None:
-            config.num_iterations = args.iterations
+            config.set("training.num_iterations", args.iterations)
         if args.games is not None:
-            config.games_per_iteration = args.games
+            config.set("self_play.games_per_iteration", args.games)
         if args.simulations is not None:
-            config.mcts_simulations = args.simulations
+            config.set("self_play.mcts_simulations", args.simulations)
         if args.epochs is not None:
-            config.epochs_per_iteration = args.epochs
+            config.set("training.epochs_per_iteration", args.epochs)
         if args.batch_size is not None:
-            config.batch_size = args.batch_size
-        if args.dirichlet_alpha is not None:
-            config.dirichlet_alpha = args.dirichlet_alpha
-        if args.dirichlet_epsilon is not None:
-            config.dirichlet_epsilon = args.dirichlet_epsilon
+            config.set("training.batch_size", args.batch_size)
         if args.batch_size_mcts is not None:
-            config.mcts_batch_size = args.batch_size_mcts
+            config.set("self_play.mcts_batch_size", args.batch_size_mcts)
         if args.scheduler is not None:
-            config.scheduler_type = args.scheduler
-        if args.scheduler_step_size is not None:
-            config.scheduler_params["step_size"] = args.scheduler_step_size
-        if args.scheduler_gamma is not None:
-            config.scheduler_params["gamma"] = args.scheduler_gamma
-        if args.scheduler_patience is not None:
-            config.scheduler_params["patience"] = args.scheduler_patience
+            config.set("scheduler.type", args.scheduler)
+        if args.resume is not None:
+            config.set("training.resume_from", args.resume)
 
-        train_alphazero(config, resume_from=args.resume)
+        train_alphazero(config)
 
     elif args.test:
         if not os.path.exists(args.test):

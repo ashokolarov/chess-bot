@@ -11,6 +11,7 @@ import chess
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
+from src.config import get_config
 from src.environment import ChessEnvironment
 from src.mcts import MCTS
 from src.network import AlphaZeroNet
@@ -77,7 +78,7 @@ def get_user_move(board):
 
 
 def play_against_alphazero(
-    model_path: str, user_plays_white: bool = True, mcts_simulations: int = 100
+    model_path: str, user_plays_white: bool = True, mcts_simulations: int = None
 ):
     """
     Play a game against the AlphaZero bot.
@@ -85,21 +86,36 @@ def play_against_alphazero(
     Args:
         model_path: Path to trained model
         user_plays_white: Whether user plays white pieces
-        mcts_simulations: Number of MCTS simulations for bot moves
+        mcts_simulations: Number of MCTS simulations for bot moves (uses config default if None)
     """
     print("🎮 AlphaZero Chess Interface")
     print("=" * 50)
 
+    # Load configuration
+    config = get_config()
+
+    # Use provided simulations or config default
+    if mcts_simulations is None:
+        mcts_simulations = config.get("self_play.mcts_simulations")
+
     # Load the trained model
     print(f"Loading model from: {model_path}")
     neural_net = AlphaZeroNet(
-        num_res_blocks=8, num_channels=64
-    )  # Match training config
+        num_res_blocks=config.get("network.num_res_blocks"),
+        num_channels=config.get("network.num_channels"),
+    )
     neural_net.load_checkpoint(model_path)
     neural_net.eval()
 
     # Create MCTS player
-    mcts_player = MCTS(neural_net, num_simulations=mcts_simulations)
+    mcts_player = MCTS(
+        neural_net,
+        c_puct=config.get("self_play.c_puct"),
+        num_simulations=mcts_simulations,
+        dirichlet_alpha=config.get("dirichlet.alpha"),
+        dirichlet_epsilon=0.0,  # No noise for playing
+        batch_size=config.get("self_play.mcts_batch_size"),
+    )
 
     # Initialize game
     env = ChessEnvironment()

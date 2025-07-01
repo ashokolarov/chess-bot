@@ -13,57 +13,66 @@ A minimal implementation of the AlphaZero algorithm for training a chess bot to 
 
 ## Usage
 
-### Training a Model
+### Training
 
-Start training with default settings (set in the config class):
+Start training with default configuration:
+
 ```bash
 python main.py --train
 ```
 
-Customize training parameters:
+Override configuration parameters:
+
 ```bash
-python main.py --train --iterations 100 --games 20 --simulations 100 --max-examples 200000 --dirichlet-alpha 0.3 --dirichlet-epsilon 0.25
+python main.py --train --iterations 10 --games 50 --simulations 400
 ```
 
 Resume training from a checkpoint:
-```bash
-python main.py --train --resume models/checkpoint_iter_25.pth
-```
 
-### Testing a Trained Model
-
-Test a trained model by watching it play sample games:
 ```bash
-python main.py --test models/final_model.pth
+python main.py --train --resume models/checkpoint_iter_5.pth
 ```
 
 ### Playing Against the Bot
 
-Play an interactive game against a trained model:
+Play against a trained model:
+
 ```bash
-# Play as White (you move first)
-python play_chess.py --model models/final_model.pth --color white
+python play_chess.py --model models/final_model.pth
+```
 
-# Play as Black (bot moves first)
+Play as black:
+
+```bash
 python play_chess.py --model models/final_model.pth --color black
+```
 
-# Adjust bot strength (more simulations = stronger but slower)
-python play_chess.py --model models/final_model.pth --simulations 200
+Adjust MCTS simulations:
+
+```bash
+python play_chess.py --model models/final_model.pth --simulations 500
 ```
 
 ### Configuration
 
-Key training parameters can be adjusted in `main.py`:
+Modify `config.yaml` to adjust training parameters:
 
-- `num_iterations`: Number of training iterations 
-- `games_per_iteration`: Self-play games per iteration 
-- `mcts_simulations`: MCTS simulations per move 
-- `max_training_examples`: Maximum training examples to keep in memory
-- `dirichlet_alpha`: Dirichlet noise concentration parameter 
-- `dirichlet_epsilon`: Mixing ratio between network policy and noise 
-- `epochs_per_iteration`: Neural network training epochs per iteration 
-- `batch_size`: Training batch size 
-- `mcts_batch_size`  # Batch size for MCTS to perform batch inference instead of feeding them to network separately
+```yaml
+# Increase training intensity
+training_loop:
+  num_iterations: 50
+  games_per_iteration: 100
+
+# Adjust network size
+network:
+  num_res_blocks: 20
+  num_channels: 512
+
+# Change exploration
+self_play:
+  mcts_simulations: 400
+  c_puct: 2.0
+```
 
 ## Training Process
 
