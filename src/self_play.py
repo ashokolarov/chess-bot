@@ -47,7 +47,6 @@ class SelfPlay:
         self,
         neural_net: AlphaZeroNet,
         mcts_simulations: int,
-        temperature_threshold: int,
         c_puct: float,
         dirichlet_alpha: float,
         dirichlet_epsilon: float,
@@ -62,9 +61,6 @@ class SelfPlay:
             dirichlet_alpha=dirichlet_alpha,
             dirichlet_epsilon=dirichlet_epsilon,
             batch_size=mcts_batch_size,
-        )
-        self.temperature_threshold = (
-            temperature_threshold  # Move number after which temp=0
         )
         self.resign_threshold = resign_threshold
 
@@ -88,7 +84,7 @@ class SelfPlay:
             state = env.get_state()
 
             # Determine temperature (high early in game, low later)
-            temperature = 1.0 if move_count < self.temperature_threshold else 0.1
+            temperature = max(0.25, 1.0 - (move_count * 0.01))  # Gradual decay
 
             # Run MCTS to get improved policy (with noise for exploration)
             policy, root = self.mcts.search(
@@ -101,8 +97,8 @@ class SelfPlay:
                 hasattr(root, "mean_value") and move_count > self.resign_threshold
             ):  # Don't resign too early
                 position_value = root.mean_value
-                # Resign if position is very bad (threshold: -0.95)
-                if position_value < -0.95:
+                # Resign if position is very bad (threshold: -0.80)
+                if position_value < -0.80:
                     if verbose:
                         print(
                             f"Resignation at move {move_count}, position value: {position_value:.3f}"
@@ -146,7 +142,7 @@ class SelfPlay:
                 print(f"Move {move_count}, FEN: {env.get_fen()}")
 
             # Reduced move limit to prevent endless games
-            if move_count > 150:  # Reduced from 200 to 150
+            if move_count > 150:
                 if verbose:
                     print("Game terminated due to move limit")
                 break

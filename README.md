@@ -102,3 +102,4 @@ The implementation consists of:
 
 1. **Increase MCTS simulations** for stronger play (but slower training)
 2. **More games per iteration** for better data diversity
+
