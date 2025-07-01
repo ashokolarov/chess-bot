@@ -31,6 +31,9 @@ class MCTSNode:
         self.children: Dict[chess.Move, MCTSNode] = {}
         self.is_expanded = False
 
+        # Batch inference support
+        self.is_evaluating = False  # Flag to track if node is waiting for evaluation
+
     def is_leaf(self) -> bool:
         """Check if this is a leaf node."""
         return len(self.children) == 0
@@ -147,7 +150,7 @@ class MCTSNode:
 
 
 class MCTS:
-    """Monte Carlo Tree Search for AlphaZero."""
+    """Monte Carlo Tree Search for AlphaZero with batch inference."""
 
     def __init__(
         self,
@@ -156,12 +159,14 @@ class MCTS:
         num_simulations: int = 100,
         dirichlet_alpha: float = 0.25,
         dirichlet_epsilon: float = 0.25,
+        batch_size: int = 8,
     ):
         self.neural_net = neural_net
         self.c_puct = c_puct
         self.num_simulations = num_simulations
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
+        self.batch_size = batch_size
         # Get device from neural network
         self.device = next(neural_net.parameters()).device
 
@@ -202,7 +207,7 @@ class MCTS:
         self, env: ChessEnvironment, temperature: float = 1.0, add_noise: bool = False
     ) -> Tuple[np.ndarray, MCTSNode]:
         """
-        Perform MCTS search and return improved policy.
+        Perform MCTS search with batch inference and return improved policy.
 
         Args:
             env: Chess environment
@@ -237,33 +242,108 @@ class MCTS:
             # Backup initial value
             root.backup(value)
 
-        # Run simulations
-        for _ in range(self.num_simulations):
-            self._simulate(root)
+        # Run simulations with batch inference
+        self._run_batched_simulations(root)
 
         # Get improved policy
         policy = root.get_action_probs(temperature)
 
         return policy, root
 
-    def _simulate(self, node: MCTSNode):
+    def _run_batched_simulations(self, root: MCTSNode):
         """
-        Run a single MCTS simulation.
+        Run MCTS simulations with batch neural network inference.
 
         Args:
-            node: Current node to simulate from
+            root: Root node of the search tree
         """
-        # Check if game is over
-        if node.env.is_game_over():
-            result = node.env.get_result()
-            if result is not None:
-                node.backup(result)
+        # Track paths through the tree for each simulation
+        simulation_paths = []
+
+        for sim_idx in range(self.num_simulations):
+            # Traverse tree to find leaf node
+            path = self._traverse_to_leaf(root)
+            simulation_paths.append(path)
+
+            # Collect nodes that need evaluation in batches
+            if (
+                len(simulation_paths) >= self.batch_size
+                or sim_idx == self.num_simulations - 1
+            ):
+                self._evaluate_batch_and_backup(simulation_paths)
+                simulation_paths = []
+
+    def _traverse_to_leaf(self, root: MCTSNode) -> List[MCTSNode]:
+        """
+        Traverse from root to a leaf node, returning the path.
+
+        Args:
+            root: Root node to start traversal
+
+        Returns:
+            Path from root to leaf node
+        """
+        path = []
+        current = root
+
+        while True:
+            path.append(current)
+
+            # Check if game is over
+            if current.env.is_game_over():
+                break
+
+            # If leaf node, we'll expand it later
+            if current.is_leaf():
+                break
+
+            # Select child and continue
+            current = current.select_child(self.c_puct)
+
+        return path
+
+    def _evaluate_batch_and_backup(self, simulation_paths: List[List[MCTSNode]]):
+        """
+        Evaluate leaf nodes in batch and backup values.
+
+        Args:
+            simulation_paths: List of paths, each ending at a leaf node
+        """
+        # Collect unique leaf nodes that need evaluation
+        leaf_nodes = []
+        path_to_leaf_map = {}  # Maps path index to leaf node
+
+        for path_idx, path in enumerate(simulation_paths):
+            leaf_node = path[-1]
+
+            # Skip if game is over
+            if leaf_node.env.is_game_over():
+                result = leaf_node.env.get_result()
+                if result is not None:
+                    self._backup_path(path, result)
+                continue
+
+            # Skip if already expanded (shouldn't happen but safety check)
+            if not leaf_node.is_leaf():
+                continue
+
+            # Add to evaluation batch
+            if leaf_node not in [n for n, _ in leaf_nodes]:
+                leaf_nodes.append((leaf_node, path_idx))
+            path_to_leaf_map[path_idx] = leaf_node
+
+        if not leaf_nodes:
             return
 
-        # If leaf node, expand and evaluate
-        if node.is_leaf():
-            policy, value = self.neural_net.predict(node.env.get_state())
+        # Prepare batch inference
+        states = [node.env.get_state() for node, _ in leaf_nodes]
 
+        # Batch neural network inference
+        policies, values = self.neural_net.predict_batch(states)
+
+        # Process results and expand nodes
+        leaf_to_policy_value = {}
+        for (node, _), policy, value in zip(leaf_nodes, policies, values):
             # Mask illegal moves
             legal_moves_mask = node.env.get_legal_moves_mask()
             policy = policy * legal_moves_mask
@@ -274,14 +354,38 @@ class MCTS:
 
             # Expand node
             node.expand(policy)
+            leaf_to_policy_value[node] = value
 
-            # Backup value
-            node.backup(value)
-            return
+        # Backup values for all simulation paths
+        for path_idx, path in enumerate(simulation_paths):
+            leaf_node = path[-1]
 
-        # Select child and continue simulation
-        child = node.select_child(self.c_puct)
-        self._simulate(child)
+            # Skip paths that ended in terminal states
+            if leaf_node.env.is_game_over():
+                continue
+
+            # Get value for this leaf node
+            if leaf_node in leaf_to_policy_value:
+                value = leaf_to_policy_value[leaf_node]
+                self._backup_path(path, value)
+
+    def _backup_path(self, path: List[MCTSNode], value: float):
+        """
+        Backup value through a path in the tree.
+
+        Args:
+            path: Path of nodes from root to leaf
+            value: Value to backup
+        """
+        # Backup from leaf to root, alternating value sign
+        for i, node in enumerate(reversed(path)):
+            # Alternate sign for each level (opponent perspective)
+            backup_value = value if i % 2 == 0 else -value
+
+            # Only update statistics, don't recurse to parent
+            node.visit_count += 1
+            node.total_value += backup_value
+            node.mean_value = node.total_value / node.visit_count
 
     def get_best_move(
         self, env: ChessEnvironment, temperature: float = 0.0

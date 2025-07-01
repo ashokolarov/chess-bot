@@ -51,6 +51,7 @@ class SelfPlay:
         c_puct: float = 1.0,
         dirichlet_alpha: float = 0.25,
         dirichlet_epsilon: float = 0.25,
+        mcts_batch_size: int = 8,
     ):
         self.neural_net = neural_net
         self.mcts = MCTS(
@@ -59,6 +60,7 @@ class SelfPlay:
             num_simulations=mcts_simulations,
             dirichlet_alpha=dirichlet_alpha,
             dirichlet_epsilon=dirichlet_epsilon,
+            batch_size=mcts_batch_size,
         )
         self.temperature_threshold = (
             temperature_threshold  # Move number after which temp=0
@@ -90,6 +92,23 @@ class SelfPlay:
             policy, root = self.mcts.search(
                 env, temperature=temperature, add_noise=True
             )
+
+            # Check for resignation based on value estimate
+            # Get value estimate from root node (after MCTS expansion)
+            if (
+                hasattr(root, "mean_value") and move_count > 20
+            ):  # Don't resign too early
+                position_value = root.mean_value
+                # Resign if position is very bad (threshold: -0.9)
+                if position_value < -0.9:
+                    if verbose:
+                        print(
+                            f"Resignation at move {move_count}, position value: {position_value:.3f}"
+                        )
+                    # Set result: if current player resigns, opponent wins
+                    final_result = -1.0  # Current player loses
+                    game.set_rewards(final_result)
+                    return game
 
             # Add training example
             game.add_example(state, policy)
@@ -124,8 +143,8 @@ class SelfPlay:
             if verbose and move_count % 10 == 0:
                 print(f"Move {move_count}, FEN: {env.get_fen()}")
 
-            # Safety check to prevent infinite games
-            if move_count > 200:
+            # Reduced move limit to prevent endless games
+            if move_count > 150:  # Reduced from 200 to 150
                 if verbose:
                     print("Game terminated due to move limit")
                 break

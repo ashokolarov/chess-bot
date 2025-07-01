@@ -92,7 +92,9 @@ def play_against_alphazero(
 
     # Load the trained model
     print(f"Loading model from: {model_path}")
-    neural_net = AlphaZeroNet()
+    neural_net = AlphaZeroNet(
+        num_res_blocks=8, num_channels=64
+    )  # Match training config
     neural_net.load_checkpoint(model_path)
     neural_net.eval()
 

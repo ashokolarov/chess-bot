@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -115,6 +115,49 @@ class AlphaZeroNet(nn.Module):
             value = value.cpu().item()
 
         return policy, value
+
+    def predict_batch(
+        self, states: List[np.ndarray]
+    ) -> Tuple[List[np.ndarray], List[float]]:
+        """
+        Make predictions for multiple states at once (batch inference).
+
+        Args:
+            states: List of board states, each of shape (8, 8, 12)
+
+        Returns:
+            policies: List of move probabilities, each of shape (4096,)
+            values: List of position evaluation scalars
+        """
+        if not states:
+            return [], []
+
+        self.eval()
+        with torch.no_grad():
+            # Convert to tensor batch, move to same device as model
+            device = next(self.parameters()).device
+
+            # Stack all states into a batch tensor
+            batch_tensor = torch.stack(
+                [torch.FloatTensor(state).permute(2, 0, 1) for state in states]
+            ).to(device)
+
+            policy_logits, values = self.forward(batch_tensor)
+
+            # Convert to probabilities and extract results
+            policies = F.softmax(policy_logits, dim=1).cpu().numpy()
+            values = values.squeeze().cpu().numpy()
+
+            # Handle single value case (when batch size is 1)
+            if values.ndim == 0:
+                values = [values.item()]
+            else:
+                values = values.tolist()
+
+            # Convert policies to list
+            policies = [policy for policy in policies]
+
+        return policies, values
 
     def save_checkpoint(self, filepath: str, optimizer_state=None, epoch=None):
         """Save model checkpoint."""

@@ -1,2 +1,181 @@
-logs/
+# Model files and training artifacts
 models/
+logs/*.json
+logs/*.log
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.pb
+*.onnx
+
+# Allow specific important files
+!README.md
+!requirements.txt
+!logs/training_progress.png  # Keep final training plots for documentation
+
+# Training data and generated datasets
+data/
+datasets/
+training_data/
+training_examples/
+*.csv
+*.npy
+*.npz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.spyderproject
+.spyproject
+.ropeproject
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyTorch
+*.pth.tar
+
+# Matplotlib/plots (except important documentation plots)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.eps
+plots/
+figures/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.out
+*.err
+
+# Configuration files with secrets
+.env.local
+.env.production
+.env.*.local
+config.ini
+secrets.json
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation builds
+docs/_build/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+.coverage
+.nox/
+.coverage.*
+.cache
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Large data files
+*.h5
+*.hdf5
+*.parquet
+
+# Weights & Biases
+wandb/
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# TensorBoard
+runs/
+tensorboard_logs/
+
+# Experiment tracking
+experiments/
+results/
+
+# Temporary Python files
+*.pyc
+*.pyo
+*.pyd
+
+# Chess-specific
+*.pgn
+game_records/
+position_databases/
+
+# Development artifacts
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.cover

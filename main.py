@@ -47,6 +47,7 @@ class AlphaZeroTrainingConfig:
         self.mcts_simulations = 50
         self.temperature_threshold = 15
         self.c_puct = 1.0
+        self.mcts_batch_size = 32  # Batch size for neural network inference
 
         # Dirichlet noise parameters
         self.dirichlet_alpha = 0.25
@@ -101,6 +102,7 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
     print(f"Device: {config.device}")
     print(f"Games per iteration: {config.games_per_iteration}")
     print(f"MCTS simulations: {config.mcts_simulations}")
+    print(f"MCTS batch size: {config.mcts_batch_size}")
     print(f"Training iterations: {config.num_iterations}")
     print(f"Dirichlet noise: α={config.dirichlet_alpha}, ε={config.dirichlet_epsilon}")
 
@@ -141,6 +143,7 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
             c_puct=config.c_puct,
             dirichlet_alpha=config.dirichlet_alpha,
             dirichlet_epsilon=config.dirichlet_epsilon,
+            mcts_batch_size=config.mcts_batch_size,
         )
 
         # Generate training data
@@ -297,6 +300,12 @@ def main():
         default=None,
         help="Dirichlet noise epsilon parameter",
     )
+    parser.add_argument(
+        "--batch-size-mcts",
+        type=int,
+        default=None,
+        help="Batch size for MCTS neural network inference",
+    )
 
     args = parser.parse_args()
 
@@ -316,6 +325,8 @@ def main():
             config.dirichlet_alpha = args.dirichlet_alpha
         if args.dirichlet_epsilon is not None:
             config.dirichlet_epsilon = args.dirichlet_epsilon
+        if args.batch_size_mcts is not None:
+            config.mcts_batch_size = args.batch_size_mcts
 
         train_alphazero(config, resume_from=args.resume)
 
