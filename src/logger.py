@@ -27,6 +27,7 @@ class AlphaZeroLogger:
             "avg_game_length": [],
             "win_rate_white": [],
             "draw_rate": [],
+            "learning_rate": [],
         }
 
         # Timing
@@ -52,6 +53,7 @@ class AlphaZeroLogger:
         avg_game_length: float = None,
         win_rate_white: float = None,
         draw_rate: float = None,
+        learning_rate: float = None,
     ):
         """
         Log metrics for a training iteration.
@@ -66,6 +68,7 @@ class AlphaZeroLogger:
             avg_game_length: Average length of games
             win_rate_white: Win rate for white pieces
             draw_rate: Draw rate
+            learning_rate: Learning rate
         """
         # Calculate time per iteration
         time_per_iteration = 0
@@ -83,6 +86,7 @@ class AlphaZeroLogger:
         self.metrics["avg_game_length"].append(avg_game_length or 0)
         self.metrics["win_rate_white"].append(win_rate_white or 0.5)
         self.metrics["draw_rate"].append(draw_rate or 0)
+        self.metrics["learning_rate"].append(learning_rate or 0)
 
         # Print progress
         self.print_iteration_summary(
@@ -129,7 +133,7 @@ class AlphaZeroLogger:
             print("No data to plot yet.")
             return
 
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig, axes = plt.subplots(2, 3, figsize=(20, 10))
         fig.suptitle("AlphaZero Training Progress", fontsize=16)
 
         iterations = self.metrics["iteration"]
@@ -150,9 +154,19 @@ class AlphaZeroLogger:
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
 
+        # Learning rate
+        axes[0, 1].plot(
+            iterations, self.metrics["learning_rate"], marker="o", color="orange"
+        )
+        axes[0, 1].set_xlabel("Iteration")
+        axes[0, 1].set_ylabel("Learning Rate")
+        axes[0, 1].set_title("Learning Rate Schedule")
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].set_yscale("log")  # Log scale for better visualization
+
         # Games and examples
-        ax_twin = axes[0, 1].twinx()
-        axes[0, 1].bar(
+        ax_twin = axes[0, 2].twinx()
+        axes[0, 2].bar(
             iterations,
             self.metrics["games_played"],
             alpha=0.7,
@@ -166,11 +180,11 @@ class AlphaZeroLogger:
             marker="o",
             label="Training Examples",
         )
-        axes[0, 1].set_xlabel("Iteration")
-        axes[0, 1].set_ylabel("Games Played", color="skyblue")
+        axes[0, 2].set_xlabel("Iteration")
+        axes[0, 2].set_ylabel("Games Played", color="skyblue")
         ax_twin.set_ylabel("Training Examples", color="orange")
-        axes[0, 1].set_title("Games and Training Examples")
-        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 2].set_title("Games and Training Examples")
+        axes[0, 2].grid(True, alpha=0.3)
 
         # Game statistics
         if any(x > 0 for x in self.metrics["avg_game_length"]):
@@ -204,6 +218,15 @@ class AlphaZeroLogger:
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
         axes[1, 1].set_ylim(0, 1)
+
+        # Time per iteration
+        axes[1, 2].plot(
+            iterations, self.metrics["time_per_iteration"], marker="o", color="green"
+        )
+        axes[1, 2].set_xlabel("Iteration")
+        axes[1, 2].set_ylabel("Time (seconds)")
+        axes[1, 2].set_title("Time per Iteration")
+        axes[1, 2].grid(True, alpha=0.3)
 
         plt.tight_layout()
 

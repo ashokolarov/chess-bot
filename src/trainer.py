@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, StepLR
 from torch.utils.data import DataLoader, Dataset
 
 from .network import AlphaZeroNet
@@ -44,6 +45,8 @@ class AlphaZeroTrainer:
         learning_rate: float = 0.001,
         weight_decay: float = 1e-4,
         device: str = None,
+        scheduler_type: str = "step",
+        scheduler_params: dict = None,
     ):
         self.neural_net = neural_net
         self.device = (
@@ -56,12 +59,79 @@ class AlphaZeroTrainer:
             neural_net.parameters(), lr=learning_rate, weight_decay=weight_decay
         )
 
+        # Learning rate scheduler
+        self.scheduler_type = scheduler_type
+        self.scheduler = self._create_scheduler(scheduler_type, scheduler_params or {})
+
         # Loss functions
         self.policy_loss_fn = nn.CrossEntropyLoss()
         self.value_loss_fn = nn.MSELoss()
 
         # Training history
-        self.training_history = {"policy_loss": [], "value_loss": [], "total_loss": []}
+        self.training_history = {
+            "policy_loss": [],
+            "value_loss": [],
+            "total_loss": [],
+            "learning_rate": [],
+        }
+
+    def _create_scheduler(self, scheduler_type: str, scheduler_params: dict):
+        """
+        Create a learning rate scheduler.
+
+        Args:
+            scheduler_type: Type of scheduler ('step', 'plateau', 'cosine')
+            scheduler_params: Parameters for the scheduler
+
+        Returns:
+            Learning rate scheduler
+        """
+        if scheduler_type == "step":
+            # StepLR: Reduce LR every step_size epochs by gamma
+            step_size = scheduler_params.get("step_size", 5)
+            gamma = scheduler_params.get("gamma", 0.8)
+            return StepLR(self.optimizer, step_size=step_size, gamma=gamma)
+
+        elif scheduler_type == "plateau":
+            # ReduceLROnPlateau: Reduce LR when loss stops improving
+            factor = scheduler_params.get("factor", 0.5)
+            patience = scheduler_params.get("patience", 3)
+            threshold = scheduler_params.get("threshold", 1e-3)
+            return ReduceLROnPlateau(
+                self.optimizer,
+                mode="min",
+                factor=factor,
+                patience=patience,
+                threshold=threshold,
+                verbose=True,
+            )
+
+        elif scheduler_type == "cosine":
+            # CosineAnnealingLR: Cosine annealing schedule
+            T_max = scheduler_params.get("T_max", 50)  # Max iterations
+            eta_min = scheduler_params.get("eta_min", 1e-6)
+            return CosineAnnealingLR(self.optimizer, T_max=T_max, eta_min=eta_min)
+
+        else:
+            raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
+    def get_current_lr(self) -> float:
+        """Get current learning rate."""
+        return self.optimizer.param_groups[0]["lr"]
+
+    def step_scheduler(self, loss: float = None):
+        """
+        Step the learning rate scheduler.
+
+        Args:
+            loss: Current loss (required for plateau scheduler)
+        """
+        if self.scheduler_type == "plateau":
+            if loss is None:
+                raise ValueError("Loss is required for plateau scheduler")
+            self.scheduler.step(loss)
+        else:
+            self.scheduler.step()
 
     def train_step(
         self,
@@ -149,9 +219,6 @@ class AlphaZeroTrainer:
         num_batches = 0
 
         for states, policies, values in dataloader:
-            # Tensors are already on the correct device from dataset
-            pass
-
             # Training step
             policy_loss, value_loss, batch_loss = self.train_step(
                 states, policies, values
@@ -171,14 +238,15 @@ class AlphaZeroTrainer:
         self.training_history["policy_loss"].append(avg_policy_loss)
         self.training_history["value_loss"].append(avg_value_loss)
         self.training_history["total_loss"].append(avg_total_loss)
+        self.training_history["learning_rate"].append(self.get_current_lr())
 
         return avg_policy_loss, avg_value_loss, avg_total_loss
 
     def train(
         self,
         training_examples: List[Tuple[np.ndarray, np.ndarray, float]],
-        epochs: int = 10,
-        batch_size: int = 32,
+        epochs: int,
+        batch_size: int,
         verbose: bool = True,
     ) -> dict:
         """
@@ -209,11 +277,13 @@ class AlphaZeroTrainer:
             )
 
             if verbose:
+                current_lr = self.get_current_lr()
                 print(
                     f"Epoch {epoch + 1}/{epochs}: "
                     f"Policy Loss: {policy_loss:.4f}, "
                     f"Value Loss: {value_loss:.4f}, "
-                    f"Total Loss: {total_loss:.4f}"
+                    f"Total Loss: {total_loss:.4f}, "
+                    f"LR: {current_lr:.6f}"
                 )
 
         return self.training_history

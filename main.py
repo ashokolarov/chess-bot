@@ -33,25 +33,36 @@ class AlphaZeroTrainingConfig:
 
     def __init__(self):
         # Network architecture
-        self.num_res_blocks = 8
-        self.num_channels = 64
+        self.num_res_blocks = 10
+        self.num_channels = 256
 
         # Training parameters
         self.learning_rate = 0.001
         self.weight_decay = 1e-4
         self.batch_size = 32
-        self.epochs_per_iteration = 15
+        self.epochs_per_iteration = 10
+
+        # Learning rate scheduler parameters
+        self.scheduler_type = "step"  # Options: "step", "plateau", "cosine"
+        self.scheduler_params = {
+            "step_size": 5,  # For StepLR: reduce LR every N iterations
+            "gamma": 0.8,  # For StepLR: multiply LR by this factor
+            "factor": 0.5,  # For ReduceLROnPlateau: factor to reduce LR
+            "patience": 3,  # For ReduceLROnPlateau: iterations to wait before reducing
+            "T_max": 25,  # For CosineAnnealingLR: maximum iterations
+        }
 
         # Self-play parameters
-        self.games_per_iteration = 10
-        self.mcts_simulations = 50
-        self.temperature_threshold = 15
-        self.c_puct = 1.0
+        self.games_per_iteration = 20
+        self.mcts_simulations = 150
+        self.temperature_threshold = 10
+        self.c_puct = np.sqrt(2)
         self.mcts_batch_size = 32  # Batch size for neural network inference
+        self.resign_threshold = 40
 
         # Dirichlet noise parameters
         self.dirichlet_alpha = 0.25
-        self.dirichlet_epsilon = 0.25
+        self.dirichlet_epsilon = 0.30
 
         # Training loop
         self.num_iterations = 25
@@ -104,6 +115,18 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
     print(f"MCTS simulations: {config.mcts_simulations}")
     print(f"MCTS batch size: {config.mcts_batch_size}")
     print(f"Training iterations: {config.num_iterations}")
+    print(f"Learning rate: {config.learning_rate}")
+    print(f"Scheduler: {config.scheduler_type}")
+    if config.scheduler_type == "step":
+        print(
+            f"  Step size: {config.scheduler_params['step_size']}, Gamma: {config.scheduler_params['gamma']}"
+        )
+    elif config.scheduler_type == "plateau":
+        print(
+            f"  Patience: {config.scheduler_params['patience']}, Factor: {config.scheduler_params['factor']}"
+        )
+    elif config.scheduler_type == "cosine":
+        print(f"  T_max: {config.scheduler_params['T_max']}")
     print(f"Dirichlet noise: α={config.dirichlet_alpha}, ε={config.dirichlet_epsilon}")
 
     # Create directories
@@ -113,7 +136,12 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
     # Initialize components
     neural_net = AlphaZeroNet(config.num_res_blocks, config.num_channels)
     trainer = AlphaZeroTrainer(
-        neural_net, config.learning_rate, config.weight_decay, config.device
+        neural_net,
+        config.learning_rate,
+        config.weight_decay,
+        config.device,
+        config.scheduler_type,
+        config.scheduler_params,
     )
     logger = AlphaZeroLogger(config.logs_dir)
 
@@ -144,6 +172,7 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
             dirichlet_alpha=config.dirichlet_alpha,
             dirichlet_epsilon=config.dirichlet_epsilon,
             mcts_batch_size=config.mcts_batch_size,
+            resign_threshold=config.resign_threshold,
         )
 
         # Generate training data
@@ -176,6 +205,15 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
         final_value_loss = history["value_loss"][-1]
         final_total_loss = history["total_loss"][-1]
 
+        # Step the learning rate scheduler
+        if config.scheduler_type == "plateau":
+            trainer.step_scheduler(final_total_loss)
+        else:
+            trainer.step_scheduler()
+
+        current_lr = trainer.get_current_lr()
+        print(f"Learning rate after iteration {iteration + 1}: {current_lr:.6f}")
+
         # Analyze game data
         game_stats = analyze_game_data(new_examples, config.games_per_iteration)
 
@@ -190,6 +228,7 @@ def train_alphazero(config: AlphaZeroTrainingConfig, resume_from: str = None):
             game_stats.get("avg_game_length"),
             game_stats.get("win_rate_white"),
             game_stats.get("draw_rate"),
+            current_lr,
         )
 
         # Save checkpoint
@@ -306,6 +345,31 @@ def main():
         default=None,
         help="Batch size for MCTS neural network inference",
     )
+    parser.add_argument(
+        "--scheduler",
+        type=str,
+        choices=["step", "plateau", "cosine"],
+        default=None,
+        help="Learning rate scheduler type",
+    )
+    parser.add_argument(
+        "--scheduler-step-size",
+        type=int,
+        default=None,
+        help="Step size for StepLR scheduler",
+    )
+    parser.add_argument(
+        "--scheduler-gamma",
+        type=float,
+        default=None,
+        help="Gamma factor for StepLR scheduler",
+    )
+    parser.add_argument(
+        "--scheduler-patience",
+        type=int,
+        default=None,
+        help="Patience for ReduceLROnPlateau scheduler",
+    )
 
     args = parser.parse_args()
 
@@ -327,6 +391,14 @@ def main():
             config.dirichlet_epsilon = args.dirichlet_epsilon
         if args.batch_size_mcts is not None:
             config.mcts_batch_size = args.batch_size_mcts
+        if args.scheduler is not None:
+            config.scheduler_type = args.scheduler
+        if args.scheduler_step_size is not None:
+            config.scheduler_params["step_size"] = args.scheduler_step_size
+        if args.scheduler_gamma is not None:
+            config.scheduler_params["gamma"] = args.scheduler_gamma
+        if args.scheduler_patience is not None:
+            config.scheduler_params["patience"] = args.scheduler_patience
 
         train_alphazero(config, resume_from=args.resume)
 

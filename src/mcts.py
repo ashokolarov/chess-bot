@@ -66,7 +66,7 @@ class MCTSNode:
 
         self.is_expanded = True
 
-    def select_child(self, c_puct: float = 1.0) -> "MCTSNode":
+    def select_child(self, c_puct: float) -> "MCTSNode":
         """
         Select child node using UCB formula.
 
@@ -155,11 +155,11 @@ class MCTS:
     def __init__(
         self,
         neural_net,
-        c_puct: float = 1.0,
-        num_simulations: int = 100,
-        dirichlet_alpha: float = 0.25,
-        dirichlet_epsilon: float = 0.25,
-        batch_size: int = 8,
+        c_puct: float,
+        num_simulations: int,
+        dirichlet_alpha: float,
+        dirichlet_epsilon: float,
+        batch_size: int,
     ):
         self.neural_net = neural_net
         self.c_puct = c_puct
@@ -204,7 +204,7 @@ class MCTS:
         return noisy_policy
 
     def search(
-        self, env: ChessEnvironment, temperature: float = 1.0, add_noise: bool = False
+        self, env: ChessEnvironment, temperature, add_noise: bool
     ) -> Tuple[np.ndarray, MCTSNode]:
         """
         Perform MCTS search with batch inference and return improved policy.

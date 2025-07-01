@@ -7,27 +7,15 @@ A minimal implementation of the AlphaZero algorithm for training a chess bot to 
 - **Complete AlphaZero Implementation**: Neural network with policy and value heads, MCTS, self-play data generation
 - **Chess Integration**: Uses `python-chess` library for game logic and move validation
 - **Training Infrastructure**: Systematic training loop with checkpointing and progress tracking
-- **Local Visualization**: Built-in loss tracking and matplotlib-based progress plots
-- **Memory Efficient**: Manages training data to prevent memory overflow
+- **Tracking and Visualization**: Built-in loss tracking and matplotlib-based progress plots
 - **Configurable**: Easy to adjust hyperparameters for different training scenarios
 
-## Installation
-
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-2. Verify installation by running a quick test:
-```bash
-python -c "import torch, chess, numpy as np, matplotlib.pyplot as plt; print('All dependencies installed successfully!')"
-```
 
 ## Usage
 
 ### Training a Model
 
-Start training with default settings (50 iterations, 10 games per iteration):
+Start training with default settings (set in the config class):
 ```bash
 python main.py --train
 ```
@@ -67,14 +55,15 @@ python play_chess.py --model models/final_model.pth --simulations 200
 
 Key training parameters can be adjusted in `main.py`:
 
-- `num_iterations`: Number of training iterations (default: 50)
-- `games_per_iteration`: Self-play games per iteration (default: 10)
-- `mcts_simulations`: MCTS simulations per move (default: 50)
-- `max_training_examples`: Maximum training examples to keep in memory (default: 100,000)
-- `dirichlet_alpha`: Dirichlet noise concentration parameter (default: 0.25)
-- `dirichlet_epsilon`: Mixing ratio between network policy and noise (default: 0.25)
-- `epochs_per_iteration`: Neural network training epochs per iteration (default: 5)
-- `batch_size`: Training batch size (default: 32)
+- `num_iterations`: Number of training iterations 
+- `games_per_iteration`: Self-play games per iteration 
+- `mcts_simulations`: MCTS simulations per move 
+- `max_training_examples`: Maximum training examples to keep in memory
+- `dirichlet_alpha`: Dirichlet noise concentration parameter 
+- `dirichlet_epsilon`: Mixing ratio between network policy and noise 
+- `epochs_per_iteration`: Neural network training epochs per iteration 
+- `batch_size`: Training batch size 
+- `mcts_batch_size`  # Batch size for MCTS to perform batch inference instead of feeding them to network separately
 
 ## Training Process
 
@@ -86,14 +75,6 @@ Each training iteration consists of:
 3. **Logging**: Progress metrics are recorded and visualized
 4. **Checkpointing**: Model state is saved for resuming training
 
-### Dirichlet Noise
-
-The implementation includes Dirichlet noise (a key component of AlphaZero) that:
-- **Improves Exploration**: Prevents the bot from getting stuck in local optima early in training
-- **Increases Diversity**: Generates more varied training games and positions
-- **Better Convergence**: Helps achieve stronger final play by exploring more move sequences
-
-The noise is only applied during training self-play, not during evaluation or human games.
 
 ## Output Files
 
@@ -103,14 +84,6 @@ Training produces several outputs:
 - `logs/`: Directory containing training metrics and progress plots
 - `logs/training_progress.png`: Visual progress charts updated after each iteration
 - `logs/training_metrics_*.json`: Detailed training metrics in JSON format
-
-## Expected Performance
-
-With default settings:
-- **Training Time**: ~2-4 hours on CPU, ~30 minutes on GPU
-- **Skill Level**: After 50 iterations, the bot should play at beginner level (~800-1000 ELO)
-- **Memory Usage**: ~1-2GB RAM during training
-- **Convergence**: Loss should steadily decrease over first 20-30 iterations
 
 ## Architecture
 
@@ -129,36 +102,3 @@ The implementation consists of:
 
 1. **Increase MCTS simulations** for stronger play (but slower training)
 2. **More games per iteration** for better data diversity
-3. **Longer training** (100+ iterations) for amateur-level strength
-4. **GPU acceleration** significantly speeds up training
-5. **Adjust learning rate** if loss plateaus or oscillates
-
-## Troubleshooting
-
-**Out of Memory**: Reduce `batch_size`, `games_per_iteration`, or `max_training_examples`
-**Slow Training**: Use GPU if available, reduce `mcts_simulations`
-**Poor Convergence**: Try adjusting learning rate or increase training data
-
-## Example Training Output
-
-```
-Starting AlphaZero Chess Training
-Device: cpu
-Games per iteration: 10
-MCTS simulations: 50
-Training iterations: 50
-
-============================================================
-STARTING ITERATION 1/50
-============================================================
-Phase 1: Self-play data generation
-Playing game 1/10
-...
-Generated 1247 training examples from 10 games
-Phase 2: Neural network training
-Training on 1247 examples for 5 epochs...
-Epoch 1/5: Policy Loss: 2.3456, Value Loss: 0.8901, Total Loss: 3.2357
-...
-```
-
-The bot will gradually improve over iterations, and you can monitor progress through the generated plots and logs. 

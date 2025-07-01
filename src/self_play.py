@@ -46,12 +46,13 @@ class SelfPlay:
     def __init__(
         self,
         neural_net: AlphaZeroNet,
-        mcts_simulations: int = 100,
-        temperature_threshold: int = 15,
-        c_puct: float = 1.0,
-        dirichlet_alpha: float = 0.25,
-        dirichlet_epsilon: float = 0.25,
-        mcts_batch_size: int = 8,
+        mcts_simulations: int,
+        temperature_threshold: int,
+        c_puct: float,
+        dirichlet_alpha: float,
+        dirichlet_epsilon: float,
+        mcts_batch_size: int,
+        resign_threshold: int,
     ):
         self.neural_net = neural_net
         self.mcts = MCTS(
@@ -65,6 +66,7 @@ class SelfPlay:
         self.temperature_threshold = (
             temperature_threshold  # Move number after which temp=0
         )
+        self.resign_threshold = resign_threshold
 
     def play_game(self, verbose: bool = False) -> SelfPlayGame:
         """
@@ -96,11 +98,11 @@ class SelfPlay:
             # Check for resignation based on value estimate
             # Get value estimate from root node (after MCTS expansion)
             if (
-                hasattr(root, "mean_value") and move_count > 20
+                hasattr(root, "mean_value") and move_count > self.resign_threshold
             ):  # Don't resign too early
                 position_value = root.mean_value
-                # Resign if position is very bad (threshold: -0.9)
-                if position_value < -0.9:
+                # Resign if position is very bad (threshold: -0.95)
+                if position_value < -0.95:
                     if verbose:
                         print(
                             f"Resignation at move {move_count}, position value: {position_value:.3f}"
