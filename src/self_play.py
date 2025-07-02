@@ -30,10 +30,16 @@ class SelfPlayGame:
             final_result: Game result (+1 for win, -1 for loss, 0 for draw)
         """
         self.rewards = []
+        # Track whose perspective each state represents
+        is_white_turn = True  # First state is from white's perspective
+
         for i in range(len(self.states)):
-            # Alternate perspective for each move
-            reward = final_result if i % 2 == 0 else -final_result
+            # From white's perspective: +1 for white win, -1 for black win
+            # From black's perspective: -1 for white win, +1 for black win
+            reward = final_result if is_white_turn else -final_result
             self.rewards.append(reward)
+            # Toggle turn for next state
+            is_white_turn = not is_white_turn
 
     def get_training_examples(self) -> List[Tuple[np.ndarray, np.ndarray, float]]:
         """Get all training examples from this game."""
@@ -95,29 +101,31 @@ class SelfPlay:
             # Determine temperature (high early in game, low later)
             temperature = max(
                 self.min_temperature,
-                self.initial_temperature - (move_count * 0.05),
-            )  # Gradual decay
+                self.initial_temperature - (move_count * 0.01),
+            )
 
             # Run MCTS to get improved policy (with noise for exploration)
             policy, root = self.mcts.search(
                 env, temperature=temperature, add_noise=True
             )
 
-            # Check for resignation based on value estimate
-            # Get value estimate from root node (after MCTS expansion)
-            if (
-                hasattr(root, "mean_value") and move_count > self.resign_threshold
-            ):  # Don't resign too early
+            # Check for resignation based on value estimate from root node
+            if move_count > self.resign_threshold:  # Don't resign too early
                 position_value = root.mean_value
-                # Resign if position is very bad (threshold: -0.80)
-                if position_value < -0.80:
+                # Position value is from current player's perspective
+                # Need to check if position is bad for the current player
+                resign_threshold = -0.80
+
+                if position_value < resign_threshold:
                     if verbose:
                         self._clear_line()
                         print(
                             f"Resignation at move {move_count}, position value: {position_value:.3f}"
                         )
                     # Set result: if current player resigns, opponent wins
-                    final_result = -1.0  # Current player loses
+                    # White (player 0) resigning means black wins (-1)
+                    # Black (player 1) resigning means white wins (+1)
+                    final_result = -1.0 if env.board.turn else 1.0
                     game.set_rewards(final_result)
                     return game
 
@@ -129,7 +137,7 @@ class SelfPlay:
             if len(legal_moves) == 0:
                 break
 
-            # Sample move from policy
+            # Sample move from policy based on temperature
             move_probs = []
             moves = []
             for move in legal_moves:
@@ -140,8 +148,14 @@ class SelfPlay:
             # Normalize probabilities
             move_probs = np.array(move_probs)
             if move_probs.sum() > 0:
-                move_probs = move_probs / move_probs.sum()
-                chosen_idx = np.random.choice(len(moves), p=move_probs)
+                # Temperature affects move selection randomness
+                if temperature < 0.01:  # Nearly deterministic
+                    chosen_idx = np.argmax(move_probs)
+                else:
+                    # Apply temperature to the probabilities
+                    move_probs = move_probs ** (1 / temperature)
+                    move_probs = move_probs / move_probs.sum()  # Renormalize
+                    chosen_idx = np.random.choice(len(moves), p=move_probs)
             else:
                 chosen_idx = np.random.choice(len(moves))
 
@@ -164,7 +178,7 @@ class SelfPlay:
         # Get game result and set rewards
         final_result = env.get_result()
         if final_result is None:
-            final_result = -1.0  # Lose if game limit reached
+            final_result = 0.0  # Draw if game limit reached
 
         game.set_rewards(final_result)
 
@@ -172,9 +186,7 @@ class SelfPlay:
             result_str = (
                 "White wins"
                 if final_result > 0
-                else "Black wins"
-                if final_result < 0
-                else "Draw"
+                else "Black wins" if final_result < 0 else "Draw"
             )
             self._clear_line()
             print(f"Game finished: {result_str}, Moves: {move_count}")
@@ -202,6 +214,7 @@ class SelfPlay:
         for game_idx in range(num_games):
             if verbose:
                 print(f"Playing game {game_idx + 1}/{num_games}", end="\r")
+                print()
 
             game = self.play_game(verbose=verbose)
             examples = game.get_training_examples()
@@ -228,12 +241,15 @@ class SelfPlay:
 
         return all_examples, game_results
 
-    def evaluate_position(self, fen: str) -> Tuple[float, np.ndarray]:
+    def evaluate_position(
+        self, fen: str, use_mcts: bool = False
+    ) -> Tuple[float, np.ndarray]:
         """
         Evaluate a chess position.
 
         Args:
             fen: FEN string of position to evaluate
+            use_mcts: Whether to use MCTS for evaluation (more accurate but slower)
 
         Returns:
             Value estimate and policy probabilities
@@ -241,15 +257,21 @@ class SelfPlay:
         env = ChessEnvironment()
         env.from_fen(fen)
 
-        state = env.get_state()
-        policy, value = self.neural_net.predict(state)
+        if use_mcts:
+            # Use MCTS for more accurate evaluation (like in actual play)
+            policy, root = self.mcts.search(env, temperature=0.0, add_noise=False)
+            value = root.mean_value
+        else:
+            # Use direct neural network evaluation (faster)
+            state = env.get_state()
+            policy, value = self.neural_net.predict(state)
 
-        # Mask illegal moves
-        legal_moves_mask = env.get_legal_moves_mask()
-        policy = policy * legal_moves_mask
+            # Mask illegal moves
+            legal_moves_mask = env.get_legal_moves_mask()
+            policy = policy * legal_moves_mask
 
-        # Renormalize
-        if policy.sum() > 0:
-            policy = policy / policy.sum()
+            # Renormalize
+            if policy.sum() > 0:
+                policy = policy / policy.sum()
 
         return value, policy

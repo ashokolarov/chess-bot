@@ -11,7 +11,7 @@ import chess
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
-from src.config import get_config
+from src.config import Config
 from src.environment import ChessEnvironment
 from src.mcts import MCTS
 from src.network import AlphaZeroNet
@@ -92,7 +92,7 @@ def play_against_alphazero(
     print("=" * 50)
 
     # Load configuration
-    config = get_config()
+    config = Config("train_config.yaml")
 
     # Use provided simulations or config default
     if mcts_simulations is None:

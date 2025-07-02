@@ -9,13 +9,15 @@ network:
 
 # Training parameters
 training:
-  num_iterations: 5
+  num_iterations: 10
   epochs_per_iteration: 10
   batch_size: 32
-  learning_rate: 0.0005
-  weight_decay: 0.0001
+  learning_rate: 0.0001
+  weight_decay: 0.0000
   checkpoint_interval: 5
-  max_training_examples: 100000  # Replay buffer size
+  max_training_examples: 100000 
+  lr_decay_factor: 0.7
+  lr_decay_interval: 2
 
 # Learning rate scheduler parameters
 scheduler:
@@ -23,25 +25,24 @@ scheduler:
   # step_size: 2  # For StepLR: reduce LR every N iterations
   # gamma: 0.8  # For StepLR: multiply LR by this factor
   type: "onecycle"  # Options: "step"
-  max_lr_factor: 1.5
+  max_lr_factor: 1.1
   pct_start: 0.3
 
 # Self-play parameters
 self_play:
-  games_per_iteration: 5
-  mcts_simulations: 250
-  initial_temperature: 1.5
-  min_temperature: 0.05
-  c_puct: 1.4142  # sqrt(2)
-  mcts_batch_size: 32  # Batch size for neural network inference
+  games_per_iteration: 10
+  mcts_simulations: 100
+  initial_temperature: 1.0
+  min_temperature: 0.0
+  c_puct: 1.5  
+  mcts_batch_size: 128  # Batch size for evaluating MCTS
   resign_threshold: 40
-  move_limit: 300
+  move_limit: 500
 
 # Dirichlet noise parameters
 dirichlet:
-  alpha: 0.3
-  epsilon: 0.25
-
+  alpha: 0.1  # Strength of noise
+  epsilon: 0.1 # Probability of noise vs. uniform distribution
 
 # Directories
 directories:

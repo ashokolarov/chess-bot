@@ -19,20 +19,31 @@ class ChessDataset(Dataset):
         self.examples = examples
         self.device = device
 
+        # Precompute tensors for better performance
+        self.states = []
+        self.policies = []
+        self.values = []
+
+        for state, policy, value in examples:
+            # Convert to tensors
+            state_tensor = torch.FloatTensor(state).permute(2, 0, 1)  # (12, 8, 8)
+            policy_tensor = torch.FloatTensor(policy)
+            value_tensor = torch.FloatTensor([value])
+
+            self.states.append(state_tensor)
+            self.policies.append(policy_tensor)
+            self.values.append(value_tensor)
+
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, idx):
-        state, policy, value = self.examples[idx]
-
-        # Convert to tensors and move to device
-        state_tensor = (
-            torch.FloatTensor(state).permute(2, 0, 1).to(self.device)
-        )  # (12, 8, 8)
-        policy_tensor = torch.FloatTensor(policy).to(self.device)
-        value_tensor = torch.FloatTensor([value]).to(self.device)
-
-        return state_tensor, policy_tensor, value_tensor
+        # Return precomputed tensors and move to device only once when accessed
+        return (
+            self.states[idx].to(self.device),
+            self.policies[idx].to(self.device),
+            self.values[idx].to(self.device),
+        )
 
 
 class AlphaZeroTrainer:
@@ -72,6 +83,15 @@ class AlphaZeroTrainer:
             "total_loss": [],
             "learning_rate": [],
         }
+
+    def set_learning_rate(self, new_lr: float):
+        """
+        Set a new base learning rate.
+
+        Args:
+            new_lr: New learning rate value
+        """
+        self.lr = new_lr
 
     def _create_scheduler(
         self,
@@ -130,6 +150,7 @@ class AlphaZeroTrainer:
             Policy loss, value loss, total loss
         """
         self.neural_net.train()
+        # Explicitly clear gradients for better memory management
         self.optimizer.zero_grad(set_to_none=True)
 
         # Forward pass
@@ -144,6 +165,8 @@ class AlphaZeroTrainer:
 
         # Backward pass
         total_loss.backward()
+        # Clip gradients to prevent exploding gradients
+        # torch.nn.utils.clip_grad_norm_(self.neural_net.parameters(), max_norm=1.0)
         self.optimizer.step()
 
         if self.scheduler_type == "onecycle":
@@ -241,6 +264,14 @@ class AlphaZeroTrainer:
             print(
                 f"Training on {len(training_examples)} examples for {epochs} epochs..."
             )
+
+        # Validate batch size is not larger than dataset
+        valid_batch_size = min(batch_size, len(training_examples))
+        if valid_batch_size < batch_size:
+            print(
+                f"Warning: Reduced batch size from {batch_size} to {valid_batch_size} to match dataset size"
+            )
+            batch_size = valid_batch_size
 
         # Create dataset and dataloader
         dataset = ChessDataset(training_examples, device=self.device)

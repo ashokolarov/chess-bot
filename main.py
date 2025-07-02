@@ -152,6 +152,13 @@ def train_alphazero(config: Config):
             # Add new examples to the training set
             all_training_examples.extend(new_examples)
 
+            # Learning rate decay
+            if iteration % config.get("training.lr_decay_interval") == 0:
+                lr = trainer.lr
+                decay_factor = config.get("training.lr_decay_factor", 0.8)
+                new_lr = lr * decay_factor
+                trainer.set_learning_rate(new_lr)
+
             # Keep only recent examples (memory management)
             if len(all_training_examples) > config.get(
                 "training.max_training_examples"
@@ -240,13 +247,14 @@ def train_alphazero(config: Config):
     print("\nTraining completed!")
 
 
-def test_model(model_path: str, num_games: int = 5):
+def test_model(model_path: str, num_games: int = 5, temperature: float = 0.0):
     """
     Test a trained model by playing sample games.
 
     Args:
         model_path: Path to trained model
         num_games: Number of test games to play
+        temperature: Temperature parameter for move selection (0.0 = deterministic)
     """
     print(f"Testing model: {model_path}")
 
@@ -271,9 +279,17 @@ def test_model(model_path: str, num_games: int = 5):
         env = ChessEnvironment()
         move_count = 0
 
+        # Gradually reduce temperature as the game progresses
+        initial_temp = temperature
+        current_temp = initial_temp
+
         while not env.is_game_over() and move_count < 200:
+            # Adjust temperature - gradually decrease to become more deterministic
+            if move_count > 10 and current_temp > 0:
+                current_temp = max(0.0, initial_temp * (1.0 - (move_count / 40.0)))
+
             # Get best move
-            best_move = mcts_player.get_best_move(env, temperature=0.0)
+            best_move = mcts_player.get_best_move(env, temperature=current_temp)
 
             # Make move
             env.make_move(best_move)
@@ -302,6 +318,12 @@ def main():
     parser.add_argument(
         "--test", type=str, help="Test a trained model (provide model path)"
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Temperature for move selection in testing (0.0 = deterministic)",
+    )
     parser.add_argument("--resume", type=str, help="Resume training from checkpoint")
     parser.add_argument(
         "--iterations", type=int, default=None, help="Number of training iterations"
@@ -323,7 +345,7 @@ def main():
     parser.add_argument(
         "--scheduler",
         type=str,
-        choices=["step", "plateau", "cosine"],
+        choices=["step", "onecycle"],
         default=None,
         help="Learning rate scheduler type",
     )
@@ -355,7 +377,7 @@ def main():
         if not os.path.exists(args.test):
             print(f"Model file not found: {args.test}")
             return
-        test_model(args.test, num_games=5)
+        test_model(args.test, num_games=5, temperature=args.temperature)
 
     else:
         print("Please specify --train or --test")

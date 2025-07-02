@@ -35,8 +35,8 @@ class MCTSNode:
         self.is_evaluating = False  # Flag to track if node is waiting for evaluation
 
     def is_leaf(self) -> bool:
-        """Check if this is a leaf node."""
-        return len(self.children) == 0
+        """Check if this is a leaf node (not yet expanded)."""
+        return not self.is_expanded
 
     def expand(self, policy: np.ndarray):
         """
@@ -327,8 +327,10 @@ class MCTS:
             if not leaf_node.is_leaf():
                 continue
 
-            # Add to evaluation batch
-            if leaf_node not in [n for n, _ in leaf_nodes]:
+            # Add to evaluation batch - use more efficient check
+            # Use node id (memory address) as identifier for uniqueness
+            node_id = id(leaf_node)
+            if node_id not in [id(n) for n, _ in leaf_nodes]:
                 leaf_nodes.append((leaf_node, path_idx))
             path_to_leaf_map[path_idx] = leaf_node
 
@@ -365,8 +367,14 @@ class MCTS:
                 continue
 
             # Get value for this leaf node
-            if leaf_node in leaf_to_policy_value:
-                value = leaf_to_policy_value[leaf_node]
+            # Use node_id to look up in leaf_to_policy_value
+            node_id = id(leaf_node)
+            matching_nodes = [
+                n for n in leaf_to_policy_value.keys() if id(n) == node_id
+            ]
+
+            if matching_nodes:
+                value = leaf_to_policy_value[matching_nodes[0]]
                 self._backup_path(path, value)
 
     def _backup_path(self, path: List[MCTSNode], value: float):
@@ -377,10 +385,18 @@ class MCTS:
             path: Path of nodes from root to leaf
             value: Value to backup
         """
-        # Backup from leaf to root, alternating value sign
+        # Determine if path length is odd or even to ensure consistent perspective
+        is_leaf_black_turn = path[-1].env.board.turn == chess.BLACK
+
+        # Backup from leaf to root
         for i, node in enumerate(reversed(path)):
-            # Alternate sign for each level (opponent perspective)
-            backup_value = value if i % 2 == 0 else -value
+            # For chess: if leaf is black's turn, even depths are black's perspective
+            # If leaf is white's turn, odd depths are black's perspective
+            is_black_perspective = (i % 2 == 0) == is_leaf_black_turn
+
+            # From white's perspective, positive value is good for white
+            # From black's perspective, positive value is good for black
+            backup_value = value if not is_black_perspective else -value
 
             # Only update statistics, don't recurse to parent
             node.visit_count += 1
@@ -400,7 +416,7 @@ class MCTS:
         Returns:
             Best move
         """
-        policy, root = self.search(env, temperature)
+        policy, root = self.search(env, temperature, add_noise=True)
 
         # Find move with highest probability
         legal_moves = env.get_legal_moves()
