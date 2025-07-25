@@ -7,7 +7,6 @@ A minimal implementation of the AlphaZero algorithm for training a chess bot to 
 - **Complete AlphaZero Implementation**: Neural network with policy and value heads, MCTS, self-play data generation
 - **Chess Integration**: Uses `python-chess` library for game logic and move validation
 - **Training Infrastructure**: Systematic training loop with checkpointing and progress tracking
-- **Tracking and Visualization**: Built-in loss tracking and matplotlib-based progress plots
 - **Configurable**: Easy to adjust hyperparameters for different training scenarios
 
 
